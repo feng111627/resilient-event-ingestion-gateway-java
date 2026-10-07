@@ -30,6 +30,9 @@ public class DefaultEventProcessor implements EventProcessor {
 
     public static final String REASON_NON_RETRYABLE = "NON_RETRYABLE";
     public static final String REASON_MAX_RETRIES = "MAX_RETRIES_EXCEEDED";
+    /** 重放轮内重试耗尽（仅用于指标区分，记录上的 failureReason 保留首次失败原因） */
+    public static final String REASON_REPLAY_MAX_RETRIES = "REPLAY_MAX_RETRIES_EXCEEDED";
+    public static final String REASON_REPLAY_NON_RETRYABLE = "REPLAY_NON_RETRYABLE";
 
     private final GatewayProperties props;
     private final GatewayMetrics metrics;
@@ -118,7 +121,12 @@ public class DefaultEventProcessor implements EventProcessor {
             } catch (Throwable t) {
                 // 兜底隔离：任何未预期异常都不能拖垮工作线程
                 log.error("Unexpected error processing {}, dead-lettering", record.getDedupKey(), t);
-                record.markDeadLetter(REASON_NON_RETRYABLE, "unexpected: " + t);
+                if (record.isReplayInFlight()) {
+                    record.markReplayFailed("unexpected: " + t);
+                    metrics.onReplayFailed();
+                } else {
+                    record.markDeadLetter(REASON_NON_RETRYABLE, "unexpected: " + t);
+                }
                 metrics.onDeadLetter(REASON_NON_RETRYABLE);
             } finally {
                 activeWorkers.decrementAndGet();
@@ -126,23 +134,40 @@ public class DefaultEventProcessor implements EventProcessor {
         }
     }
 
-    /** 单次处理 + 重试/死信判定 */
+    /** 单次处理 + 重试/死信判定；重放中的记录使用独立的 replayMaxRetries 与重放内尝试计数 */
     private void processOnce(EventRecord record) {
         record.markAttempt();
+        boolean replay = record.isReplayInFlight();
+        int maxRetries = replay ? props.getReplayMaxRetries() : props.getMaxRetries();
+        int attemptNo = replay ? record.getReplayAttempts() : record.getAttempts();
         try {
             doProcess(record);
             long elapsed = Duration.between(record.getReceivedAt(), Instant.now()).toMillis();
-            record.markSuccess(elapsed);
+            if (replay) {
+                record.markReplaySuccess(elapsed);
+                metrics.onReplaySuccess();
+                log.info("Replay of {} succeeded (replayAttempts={})",
+                        record.getDedupKey(), record.getReplayAttempts());
+            } else {
+                record.markSuccess(elapsed);
+            }
             metrics.onSuccess(elapsed);
             log.debug("Event {} succeeded after {} attempts", record.getDedupKey(), record.getAttempts());
         } catch (RetryableProcessingException e) {
-            if (record.getAttempts() <= props.getMaxRetries()) {
+            if (attemptNo <= maxRetries) {
                 record.markRetrying(e.getMessage());
                 metrics.onRetry();
-                long delay = props.getRetryBackoffMillis() * (1L << (record.getAttempts() - 1));
+                long delay = props.getRetryBackoffMillis() * (1L << (attemptNo - 1));
                 log.debug("Event {} retryable failure (attempt {}), retry in {}ms: {}",
-                        record.getDedupKey(), record.getAttempts(), delay, e.getMessage());
+                        record.getDedupKey(), attemptNo, delay, e.getMessage());
                 retryScheduler.schedule(() -> requeue(record), delay, TimeUnit.MILLISECONDS);
+            } else if (replay) {
+                // 重放轮内重试耗尽：回到 DEAD_LETTER，保留首次失败原因，之后仍可再次重放
+                record.markReplayFailed(e.getMessage());
+                metrics.onReplayFailed();
+                metrics.onDeadLetter(REASON_REPLAY_MAX_RETRIES);
+                log.warn("Replay of {} exhausted {} replay retries, back to dead-letter: {}",
+                        record.getDedupKey(), props.getReplayMaxRetries(), e.getMessage());
             } else {
                 record.markDeadLetter(REASON_MAX_RETRIES, e.getMessage());
                 metrics.onDeadLetter(REASON_MAX_RETRIES);
@@ -150,9 +175,17 @@ public class DefaultEventProcessor implements EventProcessor {
                         record.getDedupKey(), props.getMaxRetries(), e.getMessage());
             }
         } catch (NonRetryableProcessingException e) {
-            record.markDeadLetter(REASON_NON_RETRYABLE, e.getMessage());
-            metrics.onDeadLetter(REASON_NON_RETRYABLE);
-            log.warn("Event {} non-retryable failure, dead-lettered: {}", record.getDedupKey(), e.getMessage());
+            if (replay) {
+                record.markReplayFailed(e.getMessage());
+                metrics.onReplayFailed();
+                metrics.onDeadLetter(REASON_REPLAY_NON_RETRYABLE);
+                log.warn("Replay of {} hit non-retryable failure, back to dead-letter: {}",
+                        record.getDedupKey(), e.getMessage());
+            } else {
+                record.markDeadLetter(REASON_NON_RETRYABLE, e.getMessage());
+                metrics.onDeadLetter(REASON_NON_RETRYABLE);
+                log.warn("Event {} non-retryable failure, dead-lettered: {}", record.getDedupKey(), e.getMessage());
+            }
         }
     }
 

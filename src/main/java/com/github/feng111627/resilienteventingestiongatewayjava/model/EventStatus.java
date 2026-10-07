@@ -9,5 +9,7 @@ public enum EventStatus {
     /** 可重试失败处理中（等待重试） */
     RETRYING,
     /** 重试耗尽或不可重试，进入失败记录 */
-    DEAD_LETTER
+    DEAD_LETTER,
+    /** 失败事件正在被重放处理 */
+    REPLAYING
 }

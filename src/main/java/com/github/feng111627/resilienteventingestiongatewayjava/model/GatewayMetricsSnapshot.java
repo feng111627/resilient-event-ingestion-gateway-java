@@ -16,6 +16,10 @@ public record GatewayMetricsSnapshot(
         int activeWorkers,
         double avgProcessingMillis,
         long maxProcessingMillis,
-        Map<String, Long> deadLetterByReason
+        Map<String, Long> deadLetterByReason,
+        long totalReplayAccepted,
+        long totalReplayRejected,
+        long totalReplaySuccess,
+        long totalReplayFailed
 ) {
 }

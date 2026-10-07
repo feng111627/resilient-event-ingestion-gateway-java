@@ -23,11 +23,22 @@ public class GatewayMetrics {
     private final AtomicLong maxProcessingMillis = new AtomicLong();
     private final ConcurrentHashMap<String, LongAdder> deadLetterByReason = new ConcurrentHashMap<>();
 
+    /** 重放指标 */
+    private final LongAdder totalReplayAccepted = new LongAdder();
+    private final LongAdder totalReplayRejected = new LongAdder();
+    private final LongAdder totalReplaySuccess = new LongAdder();
+    private final LongAdder totalReplayFailed = new LongAdder();
+
     public void onReceived(int count) { totalReceived.add(count); }
     public void onAccepted() { totalAccepted.increment(); }
     public void onDuplicate() { totalDuplicates.increment(); }
     public void onRejected() { totalRejected.increment(); }
     public void onRetry() { totalRetries.increment(); }
+
+    public void onReplayAccepted() { totalReplayAccepted.increment(); }
+    public void onReplayRejected() { totalReplayRejected.increment(); }
+    public void onReplaySuccess() { totalReplaySuccess.increment(); }
+    public void onReplayFailed() { totalReplayFailed.increment(); }
 
     public void onSuccess(long processingMillis) {
         totalSuccess.increment();
@@ -58,7 +69,11 @@ public class GatewayMetrics {
                 activeWorkers,
                 avg,
                 maxProcessingMillis.get(),
-                Map.copyOf(byReason)
+                Map.copyOf(byReason),
+                totalReplayAccepted.sum(),
+                totalReplayRejected.sum(),
+                totalReplaySuccess.sum(),
+                totalReplayFailed.sum()
         );
     }
 }
