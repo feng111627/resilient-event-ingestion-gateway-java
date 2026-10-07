@@ -11,6 +11,8 @@ public record GatewayMetricsSnapshot(
         long totalSuccess,
         long totalDeadLetter,
         long totalRetries,
+        long totalReplayAccepted,
+        long totalReplayRejected,
         int queueDepth,
         int queueCapacity,
         int activeWorkers,

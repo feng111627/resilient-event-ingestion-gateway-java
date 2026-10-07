@@ -19,6 +19,12 @@ public class GatewayProperties {
     private double rateLimitPerSecond = 200;
     /** 单批最大事件数 */
     private int maxBatchSize = 500;
+    /** 重放轮次最大重试次数（不含重放首次），与首次接入的 maxRetries 相互独立 */
+    private int replayMaxRetries = 2;
+    /** 重放入口限流：每秒允许的重放请求数，超限快速拒绝保证延迟有界 */
+    private double replayRateLimitPerSecond = 100;
+    /** 单次批量重放最大事件数 */
+    private int replayMaxBatchSize = 1000;
 
     public int getQueueCapacity() { return queueCapacity; }
     public void setQueueCapacity(int queueCapacity) { this.queueCapacity = queueCapacity; }
@@ -32,4 +38,10 @@ public class GatewayProperties {
     public void setRateLimitPerSecond(double rateLimitPerSecond) { this.rateLimitPerSecond = rateLimitPerSecond; }
     public int getMaxBatchSize() { return maxBatchSize; }
     public void setMaxBatchSize(int maxBatchSize) { this.maxBatchSize = maxBatchSize; }
+    public int getReplayMaxRetries() { return replayMaxRetries; }
+    public void setReplayMaxRetries(int replayMaxRetries) { this.replayMaxRetries = replayMaxRetries; }
+    public double getReplayRateLimitPerSecond() { return replayRateLimitPerSecond; }
+    public void setReplayRateLimitPerSecond(double replayRateLimitPerSecond) { this.replayRateLimitPerSecond = replayRateLimitPerSecond; }
+    public int getReplayMaxBatchSize() { return replayMaxBatchSize; }
+    public void setReplayMaxBatchSize(int replayMaxBatchSize) { this.replayMaxBatchSize = replayMaxBatchSize; }
 }

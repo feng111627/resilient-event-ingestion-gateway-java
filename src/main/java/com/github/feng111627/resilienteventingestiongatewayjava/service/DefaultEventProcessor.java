@@ -136,18 +136,21 @@ public class DefaultEventProcessor implements EventProcessor {
             metrics.onSuccess(elapsed);
             log.debug("Event {} succeeded after {} attempts", record.getDedupKey(), record.getAttempts());
         } catch (RetryableProcessingException e) {
-            if (record.getAttempts() <= props.getMaxRetries()) {
+            // 重放轮次使用独立的重试次数上限，与首次接入互不影响
+            int maxRetries = record.isReplayRoundActive() ? props.getReplayMaxRetries() : props.getMaxRetries();
+            int roundAttempts = record.attemptsInCurrentRound();
+            if (roundAttempts <= maxRetries) {
                 record.markRetrying(e.getMessage());
                 metrics.onRetry();
-                long delay = props.getRetryBackoffMillis() * (1L << (record.getAttempts() - 1));
-                log.debug("Event {} retryable failure (attempt {}), retry in {}ms: {}",
-                        record.getDedupKey(), record.getAttempts(), delay, e.getMessage());
+                long delay = props.getRetryBackoffMillis() * (1L << (roundAttempts - 1));
+                log.debug("Event {} retryable failure (round attempt {}), retry in {}ms: {}",
+                        record.getDedupKey(), roundAttempts, delay, e.getMessage());
                 retryScheduler.schedule(() -> requeue(record), delay, TimeUnit.MILLISECONDS);
             } else {
                 record.markDeadLetter(REASON_MAX_RETRIES, e.getMessage());
                 metrics.onDeadLetter(REASON_MAX_RETRIES);
                 log.warn("Event {} exhausted {} retries, dead-lettered: {}",
-                        record.getDedupKey(), props.getMaxRetries(), e.getMessage());
+                        record.getDedupKey(), maxRetries, e.getMessage());
             }
         } catch (NonRetryableProcessingException e) {
             record.markDeadLetter(REASON_NON_RETRYABLE, e.getMessage());
@@ -168,13 +171,19 @@ public class DefaultEventProcessor implements EventProcessor {
 
     /**
      * 本地模拟下游处理。failMode:
-     * none=成功；retryable=恒可重试失败；fatal=恒不可重试失败；flaky=前两次可重试失败后成功。
+     * none=成功；retryable=恒可重试失败；fatal=恒不可重试失败；flaky=前两次可重试失败后成功；
+     * recoverable=首次接入期间恒可重试失败（模拟下游抖动），重放时成功（模拟下游已恢复）。
      */
     private void doProcess(EventRecord record) {
         String mode = record.getFailMode();
         switch (mode) {
             case "retryable" -> throw new RetryableProcessingException("simulated transient downstream error");
             case "fatal" -> throw new NonRetryableProcessingException("simulated permanent validation error");
+            case "recoverable" -> {
+                if (!record.isReplayRoundActive()) {
+                    throw new RetryableProcessingException("simulated downstream outage, recovers on replay");
+                }
+            }
             case "flaky" -> {
                 if (record.getAttempts() < 3) {
                     throw new RetryableProcessingException("simulated flaky error, attempt=" + record.getAttempts());

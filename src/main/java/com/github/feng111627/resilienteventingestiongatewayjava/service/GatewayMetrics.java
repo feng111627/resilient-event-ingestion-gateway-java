@@ -19,6 +19,8 @@ public class GatewayMetrics {
     private final LongAdder totalSuccess = new LongAdder();
     private final LongAdder totalDeadLetter = new LongAdder();
     private final LongAdder totalRetries = new LongAdder();
+    private final LongAdder totalReplayAccepted = new LongAdder();
+    private final LongAdder totalReplayRejected = new LongAdder();
     private final LongAdder processingMillisSum = new LongAdder();
     private final AtomicLong maxProcessingMillis = new AtomicLong();
     private final ConcurrentHashMap<String, LongAdder> deadLetterByReason = new ConcurrentHashMap<>();
@@ -28,6 +30,8 @@ public class GatewayMetrics {
     public void onDuplicate() { totalDuplicates.increment(); }
     public void onRejected() { totalRejected.increment(); }
     public void onRetry() { totalRetries.increment(); }
+    public void onReplayAccepted() { totalReplayAccepted.increment(); }
+    public void onReplayRejected() { totalReplayRejected.increment(); }
 
     public void onSuccess(long processingMillis) {
         totalSuccess.increment();
@@ -53,6 +57,8 @@ public class GatewayMetrics {
                 success,
                 totalDeadLetter.sum(),
                 totalRetries.sum(),
+                totalReplayAccepted.sum(),
+                totalReplayRejected.sum(),
                 queueDepth,
                 queueCapacity,
                 activeWorkers,
